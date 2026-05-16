@@ -1,0 +1,32 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "lldb",
+      "request": "launch",
+      "args": [],
+      "cwd": "/Users/hari/LearnLang/Cpp",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "Run (No Debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "Debug with Arguments",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "args": ["5", "3", "+"],
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    }
+  ]
+}

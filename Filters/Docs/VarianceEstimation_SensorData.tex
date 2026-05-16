@@ -1,0 +1,433 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{array}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+
+\geometry{margin=2.5cm}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!70!black,
+    urlcolor=blue!70!black,
+    citecolor=blue!70!black
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{Variance Estimation for Sensor Data in Kalman Filters}}
+\fancyhead[R]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\title{\textbf{Variance Estimation for Sensor Data\\in Kalman Filters}\\[0.5em]
+\large A Practical Guide for UTS/IMU Fusion}
+\author{GNC Engineering Notes}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+%----------------------------------------------------------------------
+\section{Introduction}
+
+When fusing sensor data in a Kalman filter (KF), the measurement noise covariance matrix $\mathbf{R}$ characterizes the variance of the sensor noise. Accurate estimation of $\mathbf{R}$ is critical:
+\begin{itemize}
+    \item \textbf{Too small $\mathbf{R}$}: Filter over-trusts noisy measurements, causing jitter.
+    \item \textbf{Too large $\mathbf{R}$}: Filter ignores measurements, relying excessively on prediction.
+\end{itemize}
+
+This document explores the challenges of estimating sensor variance---specifically for a Universal Total Station (UTS) at 10\,Hz fused with an IMU at 50\,Hz---and compares several estimation approaches.
+
+%----------------------------------------------------------------------
+\section{Sample Size for Population Variance}
+
+\subsection{Confidence Interval for Variance}
+
+For $n$ i.i.d.\ samples from a normal distribution with true variance $\sigma^2$, the sample variance $s^2$ follows a scaled chi-squared distribution:
+
+\begin{equation}
+    \frac{(n-1)s^2}{\sigma^2} \sim \chi^2_{n-1}
+\end{equation}
+
+The $100(1-\alpha)\%$ confidence interval for $\sigma^2$ is:
+
+\begin{equation}
+    \left[\frac{(n-1)s^2}{\chi^2_{\alpha/2,\,n-1}},\quad \frac{(n-1)s^2}{\chi^2_{1-\alpha/2,\,n-1}}\right]
+\end{equation}
+
+\subsection{Required Sample Sizes (95\% CI)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Desired precision ($\pm$\% of true variance)} & \textbf{Approx.\ sample size} \\
+\midrule
+$\pm 20\%$ & $\sim 50$ \\
+$\pm 10\%$ & $\sim 200$ \\
+$\pm 5\%$  & $\sim 800$ \\
+\bottomrule
+\end{tabular}
+\caption{Sample sizes for population variance estimation at 95\% confidence.}
+\end{table}
+
+\subsection{Effect of Autocorrelation}
+
+Sensor data at constant frequency is typically autocorrelated, reducing the effective sample size:
+
+\begin{equation}
+    n_{\mathrm{eff}} = \frac{n}{1 + 2\displaystyle\sum_{k=1}^{M} \rho(k)}
+\end{equation}
+
+where $\rho(k)$ is the autocorrelation at lag $k$. For a first-order approximation with dominant lag-1 autocorrelation $\rho$:
+
+\begin{equation}
+    n_{\mathrm{eff}} \approx \frac{n}{1 + 2\,\dfrac{\rho}{1-\rho}} = \frac{n(1-\rho)}{1+\rho}
+\end{equation}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}cccc@{}}
+\toprule
+\textbf{Raw samples} & \textbf{Duration @ 10\,Hz} & $\boldsymbol{n_{\mathrm{eff}}}$ ($\rho=0.9$) & \textbf{Variance precision (95\% CI)} \\
+\midrule
+50  & 5\,s  & $\sim 3$  & Very poor \\
+100 & 10\,s & $\sim 5$  & $\pm 60$--$80\%$ \\
+200 & 20\,s & $\sim 11$ & $\pm 40$--$50\%$ \\
+500 & 50\,s & $\sim 26$ & $\pm 25$--$30\%$ \\
+\bottomrule
+\end{tabular}
+\caption{Effective sample sizes for UTS at 10\,Hz with high autocorrelation.}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{Approaches to $\mathbf{R}$ Estimation}
+
+\subsection{Overview of Methods}
+
+\begin{enumerate}
+    \item \textbf{Offline characterization}: Collect stationary data, compute variance, hardcode into $\mathbf{R}$.
+    \item \textbf{Manufacturer specification}: Use stated accuracy spec $\Rightarrow \sigma^2$.
+    \item \textbf{Online raw sample variance}: Rolling window of raw measurements. \textcolor{red}{Fails under motion.}
+    \item \textbf{Online with moving-mean subtraction}: High-pass filter before variance. Partial fix.
+    \item \textbf{Innovation-based adaptive}: Use KF innovation sequence. \textcolor{green!50!black}{Recommended.}
+\end{enumerate}
+
+\subsection{Recommended: Static $\mathbf{R}$ with Innovation Monitoring}
+
+For most production systems:
+\begin{itemize}
+    \item Hardcode $\mathbf{R}$ from offline characterization or spec sheet.
+    \item Monitor innovations online for anomaly detection (multipath, obstruction).
+    \item The KF is \textbf{robust to moderate $\mathbf{R}$ misspecification}---being off by $2\times$ typically causes only slight performance degradation.
+\end{itemize}
+
+%----------------------------------------------------------------------
+\section{Why Raw Sample Variance Fails Under Motion}
+
+\subsection{The Fundamental Problem}
+
+The sample variance:
+\begin{equation}
+    s^2 = \frac{1}{N-1}\sum_{i=1}^{N}(z_i - \bar{z})^2
+\end{equation}
+captures \textbf{both} measurement noise \textbf{and} any deterministic position change within the window. Under motion, the position change dwarfs the noise.
+
+\subsection{Analysis: $N = 5$ Samples (0.5\,s @ 10\,Hz)}
+
+Assume true UTS noise $\sigma = 3$\,mm, so $\sigma^2 = 9 \times 10^{-6}$\,m$^2$.
+
+\subsubsection{Case 1: Stationary}
+
+\begin{align}
+    \text{True positions:} &\quad \{0,\, 0,\, 0,\, 0,\, 0\} \text{ m} \\
+    \text{Motion variance:} &\quad 0 \\
+    \text{Expected } s^2 &= \sigma^2 = 9 \times 10^{-6} \text{ m}^2 \quad \checkmark
+\end{align}
+
+\textbf{Result:} Correct, but wide 95\% CI due to only 4 degrees of freedom.
+
+\subsubsection{Case 2: Constant Velocity --- 1\,m/s}
+
+\begin{align}
+    \text{True positions:} &\quad \{0,\, 0.1,\, 0.2,\, 0.3,\, 0.4\} \text{ m} \\
+    \bar{p} &= 0.2 \text{ m}
+\end{align}
+
+Motion variance:
+\begin{equation}
+    \text{Var}_{\mathrm{motion}} = \frac{1}{4}\left[(0.04 + 0.01 + 0 + 0.01 + 0.04)\right] = 0.025 \text{ m}^2
+\end{equation}
+
+\begin{equation}
+    \text{Expected } s^2 = \sigma^2 + 0.025 \approx 0.025 \text{ m}^2
+\end{equation}
+
+\textbf{Result:} Overestimate by $\boldsymbol{\sim 2{,}800\times}$.
+
+\subsubsection{Case 3: Acceleration --- 1\,m/s$^2$ from Rest}
+
+\begin{align}
+    \text{True positions } \left(\tfrac{1}{2}at^2\right): &\quad \{0,\, 0.005,\, 0.02,\, 0.045,\, 0.08\} \text{ m} \\
+    \bar{p} &= 0.03 \text{ m}
+\end{align}
+
+Motion variance:
+\begin{equation}
+    \text{Var}_{\mathrm{motion}} = \frac{1}{4}\sum_{i=0}^{4}\left(p_i - 0.03\right)^2 \approx 1.06 \times 10^{-3} \text{ m}^2
+\end{equation}
+
+\textbf{Result:} Overestimate by $\boldsymbol{\sim 119\times}$.
+
+\subsection{Analysis: $N = 25$ Samples (2.5\,s @ 10\,Hz)}
+
+Larger window makes things \textbf{worse} under motion:
+
+\subsubsection{Constant Velocity --- 1\,m/s}
+
+\begin{align}
+    \text{True positions:} &\quad \{0,\, 0.1,\, 0.2,\, \ldots,\, 2.4\} \text{ m} \\
+    \bar{p} &= 1.2 \text{ m}
+\end{align}
+
+\begin{equation}
+    \text{Var}_{\mathrm{motion}} = \frac{0.01}{24}\sum_{i=0}^{24}(i - 12)^2 = \frac{0.01 \times 1250}{24} = 0.521 \text{ m}^2
+\end{equation}
+
+\textbf{Result:} Overestimate by $\boldsymbol{\sim 57{,}900\times}$ --- 20$\times$ worse than $N=5$.
+
+\subsubsection{Acceleration --- 1\,m/s$^2$}
+
+\begin{equation}
+    \text{Var}_{\mathrm{motion}} \approx 0.427 \text{ m}^2
+\end{equation}
+
+\textbf{Result:} Overestimate by $\boldsymbol{\sim 47{,}400\times}$ --- $\sim 400\times$ worse than $N=5$.
+
+\subsection{Summary: Raw Variance Under Motion}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Scenario} & \multicolumn{2}{c}{\textbf{$N=5$ (0.5\,s)}} & \multicolumn{2}{c}{\textbf{$N=25$ (2.5\,s)}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+ & $s^2$ & Overest.\ & $s^2$ & Overest.\ \\
+\midrule
+Stationary          & $9 \times 10^{-6}$ & $1\times$      & $9 \times 10^{-6}$ & $1\times$ \\
+1\,m/s const.\ vel. & $0.025$            & $2{,}800\times$ & $0.521$            & $57{,}900\times$ \\
+1\,m/s$^2$ accel.   & $1.07 \times 10^{-3}$ & $119\times$  & $0.427$            & $47{,}400\times$ \\
+\bottomrule
+\end{tabular}
+\caption{Raw sample variance is catastrophically inflated under motion.}
+\end{table}
+
+\textbf{Key insight:} Motion variance grows as $\sim v^2 T^2$ (velocity) or $\sim a^2 T^4$ (acceleration), completely dominating noise for any practical window size.
+
+%----------------------------------------------------------------------
+\section{Subtracting the Mean vs.\ Detrending vs.\ Innovation}
+
+\subsection{What Does Subtracting the Mean Do?}
+
+A common misconception: ``If I subtract the mean before computing variance, will it remove motion?''
+
+\textbf{No.} The sample variance \textbf{already} subtracts the mean:
+\begin{equation}
+    s^2 = \frac{1}{N-1}\sum(z_i - \bar{z})^2
+\end{equation}
+
+Subtracting the mean only removes a \textbf{constant offset}---it does nothing about trends within the window.
+
+\subsection{What Each Approach Removes}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}p{4cm}p{4cm}p{4.5cm}@{}}
+\toprule
+\textbf{What you subtract} & \textbf{Removes} & \textbf{Still contaminated by} \\
+\midrule
+Mean (= sample variance) & DC offset & Linear trend, acceleration, any dynamics \\
+Linear fit (detrending) & DC offset + constant velocity & Acceleration, jerk \\
+Quadratic fit & DC offset + velocity + acceleration & Jerk, higher-order dynamics \\
+KF prediction $H\hat{\mathbf{x}}_k^-$ & Full predicted state at \textbf{each} timestep & Only true noise (by design) \\
+\bottomrule
+\end{tabular}
+\caption{Hierarchy of motion removal approaches.}
+\end{table}
+
+\subsection{Example: 1\,m/s motion, $N = 5$}
+
+\begin{align}
+    \text{Raw data:} &\quad \{0.0,\; 0.1,\; 0.2,\; 0.3,\; 0.4\} & \text{(dominated by motion)} \\
+    \text{Subtract mean:} &\quad \{-0.2,\; -0.1,\; 0.0,\; 0.1,\; 0.2\} & \text{(still a ramp, } s^2 \approx 0.025\text{)} \\
+    \text{Subtract linear trend:} &\quad \{\sim 0,\; \sim 0,\; \sim 0,\; \sim 0,\; \sim 0\} & \text{(only noise remains)} \\
+    \text{Subtract KF prediction:} &\quad \{\varepsilon_1,\; \varepsilon_2,\; \varepsilon_3,\; \varepsilon_4,\; \varepsilon_5\} & \text{(only noise remains)}
+\end{align}
+
+%----------------------------------------------------------------------
+\section{Moving-Mean Subtraction Approach}
+
+\subsection{Method}
+
+Compute a moving mean, subtract it from the signal, then compute variance on the residual:
+\begin{equation}
+    \tilde{z}_k = z_k - \bar{z}_k^{(M)}, \qquad \bar{z}_k^{(M)} = \frac{1}{M}\sum_{i=0}^{M-1} z_{k-i}
+\end{equation}
+
+This is essentially a \textbf{high-pass filter}.
+
+\subsection{Constant Velocity Analysis}
+
+For a ramp $p_k = v \cdot k\Delta t$, the moving mean has a systematic lag:
+\begin{equation}
+    \bar{z}_k^{(M)} \approx p_k - v\Delta t \cdot \frac{M-1}{2}
+\end{equation}
+
+The residual:
+\begin{equation}
+    \tilde{z}_k = \underbrace{v\Delta t \cdot \frac{M-1}{2}}_{\text{constant bias}} + \underbrace{\epsilon_k - \frac{1}{M}\sum_{i=0}^{M-1}\epsilon_{k-i}}_{\text{high-pass filtered noise}}
+\end{equation}
+
+The constant bias \textbf{does not affect variance}. The noise term has variance:
+\begin{equation}
+    \mathrm{Var}(\tilde{z}_k) = \sigma^2\left(1 - \frac{1}{M}\right) = \sigma^2 \cdot \frac{M-1}{M}
+\end{equation}
+
+\textbf{Result for constant velocity:} This approach works, with a slight underestimate by factor $\frac{M-1}{M}$.
+
+\subsection{Acceleration Analysis}
+
+For $p_k = \frac{1}{2}a(k\Delta t)^2$, the moving mean cannot track a parabola. The residual contains a \textbf{time-varying bias}:
+\begin{equation}
+    \text{bias}_k \propto a \cdot \Delta t^2 \cdot k \cdot \frac{M-1}{2}
+\end{equation}
+
+Since this bias \textbf{changes with time}, it inflates the variance window.
+
+For $a = 1$\,m/s$^2$, $\Delta t = 0.1$\,s, $M=5$, $N=5$:
+\begin{equation}
+    \text{Overestimate} \approx 5\times
+\end{equation}
+
+Better than raw (119$\times$), but still biased.
+
+\subsection{Autocorrelation Issue}
+
+The residuals $\tilde{z}_k = \epsilon_k - \bar{\epsilon}_k^{(M)}$ are \textbf{autocorrelated} because adjacent samples share overlapping mean windows. This means:
+\begin{itemize}
+    \item Fewer effective degrees of freedom than expected.
+    \item Larger $N$ needed for reliable estimates.
+    \item Variance is biased by factor $\frac{M-1}{M}$.
+\end{itemize}
+
+\subsection{Summary: Moving-Mean Approach}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Scenario} & \textbf{Raw var.} & \textbf{Moving-mean sub.} & \textbf{Innovation-based} \\
+\midrule
+Stationary            & $\sigma^2$ (correct) & $\frac{M-1}{M}\sigma^2$ (slight underest.) & $\sigma^2$ (correct) \\
+1\,m/s const.\ vel.   & $2{,}800\times$ overest. & $\sim 1\times$ (works) & $1\times$ (correct) \\
+1\,m/s$^2$ accel.     & $119\times$ overest.     & $\sim 5\times$ overest. & $1\times$ (correct) \\
+Jerk / complex motion & Catastrophic             & Still leaks             & $1\times$ (correct) \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of variance estimation methods under different motion profiles.}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{Innovation-Based Adaptive Estimation}
+
+\subsection{The Innovation Sequence}
+
+The KF innovation (measurement residual) at time step $k$ is:
+\begin{equation}
+    \boldsymbol{\nu}_k = \mathbf{z}_k - \mathbf{H}\hat{\mathbf{x}}_k^{-}
+\end{equation}
+
+where $\hat{\mathbf{x}}_k^{-}$ is the \textbf{predicted state} (prior). This subtraction removes the predicted motion---including velocity, acceleration, and any dynamics captured by the state model---leaving only the measurement noise.
+
+\subsection{Adaptive $\mathbf{R}$ Estimation}
+
+Estimate $\mathbf{R}$ from the last $N$ innovations:
+\begin{equation}
+    \boxed{\hat{\mathbf{R}}_k = \frac{1}{N}\sum_{i=k-N+1}^{k} \boldsymbol{\nu}_i \boldsymbol{\nu}_i^T - \mathbf{H}\mathbf{P}_k^{-}\mathbf{H}^T}
+\end{equation}
+
+The term $\mathbf{H}\mathbf{P}_k^{-}\mathbf{H}^T$ corrects for the prediction uncertainty contribution to the innovation covariance.
+
+\subsection{Properties}
+
+\begin{itemize}
+    \item \textbf{Handles arbitrary dynamics}: Everything captured by the state model is removed.
+    \item \textbf{Minimal latency}: $N = 15$--$20$ samples (1.5--2\,s at 10\,Hz) is sufficient.
+    \item \textbf{No extra computation}: The innovation $\boldsymbol{\nu}_k$ is \textbf{already computed} in every KF update step.
+    \item \textbf{No autocorrelation issue}: Innovations of a correctly tuned KF are white (uncorrelated).
+    \item \textbf{Self-consistent}: Uses the filter's own prediction model rather than an external assumption.
+\end{itemize}
+
+\subsection{Recommended Configuration for UTS (10\,Hz) + IMU (50\,Hz)}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}ll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Recommendation} \\
+\midrule
+Primary approach    & Hardcode $\mathbf{R}$ from offline characterization or spec sheet \\
+Adaptive window $N$ & 15--20 samples ($\sim$2\,s at 10\,Hz) \\
+Cold start          & Use conservative (larger) $\mathbf{R}$ for first 2--3\,s \\
+Monitoring          & Check innovation consistency for anomaly detection \\
+\bottomrule
+\end{tabular}
+\caption{Production configuration for UTS/IMU Kalman filter.}
+\end{table}
+
+%----------------------------------------------------------------------
+\section{Summary of Key Takeaways}
+
+\begin{enumerate}
+    \item \textbf{Raw sample variance is only valid when stationary.} Under any motion, it produces massively inflated estimates because deterministic position changes are aliased as noise.
+
+    \item \textbf{Larger windows make it worse under motion.} Motion variance grows as $\sim v^2T^2$ (velocity) or $\sim a^2T^4$ (acceleration).
+
+    \item \textbf{Subtracting the mean does not help.} Sample variance already subtracts the mean. A ramp minus its mean is still a ramp.
+
+    \item \textbf{Moving-mean subtraction partially helps} for constant-velocity motion but fails for acceleration and introduces autocorrelation in the residuals.
+
+    \item \textbf{Innovation-based estimation is the principled solution.} It removes all predicted dynamics, requires no extra computation, and works for arbitrary motion profiles.
+
+    \item \textbf{For production: hardcode $\mathbf{R}$, monitor innovations.} The KF is robust to moderate $\mathbf{R}$ misspecification. Use innovation monitoring for anomaly detection rather than continuous $\mathbf{R}$ adaptation.
+\end{enumerate}
+
+%----------------------------------------------------------------------
+\section*{Quick Reference}
+
+\begin{equation*}
+\boxed{
+\begin{aligned}
+    &\text{Innovation:} && \boldsymbol{\nu}_k = \mathbf{z}_k - \mathbf{H}\hat{\mathbf{x}}_k^{-} \\[6pt]
+    &\text{Adaptive } \mathbf{R}: && \hat{\mathbf{R}}_k = \frac{1}{N}\sum_{i=k-N+1}^{k}\boldsymbol{\nu}_i\boldsymbol{\nu}_i^T - \mathbf{H}\mathbf{P}_k^{-}\mathbf{H}^T \\[6pt]
+    &\text{Window size:} && N = 15\text{--}20 \;\;(\sim 2\text{\,s at 10\,Hz}) \\[6pt]
+    &\text{Moving-mean bias:} && \mathrm{Var}_{\text{est}} = \sigma^2 \cdot \frac{M-1}{M} \\[6pt]
+    &\text{Effective samples:} && n_{\mathrm{eff}} = \frac{n(1-\rho)}{1+\rho}
+\end{aligned}
+}
+\end{equation*}
+
+\end{document}
