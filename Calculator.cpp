@@ -1,6 +1,6 @@
 #include <iostream>
 //namespace std;
-void main()
+int main()
 {
     // Declare variables to hold the two numbers and the result
     double num1, num2, result;
@@ -32,14 +32,15 @@ void main()
             else
             {
                 std::cout << "Error: Division by zero!" << std::endl;
-                return;
+                return 0;
             }
             break;
         default:
             std::cout << "Error: Invalid operation!" << std::endl;
-            return;
+            return 0;
     }
 
     // Output the result
     std::cout << "Result: " << result << std::endl;
+    return 0;
 }

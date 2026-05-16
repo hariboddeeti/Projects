@@ -6,8 +6,27 @@
       "type": "lldb",
       "request": "launch",
       "args": [],
-      "cwd": "/Users/hari/Cpp/Cpp",
-      "program": "/Users/hari/Cpp/Cpp/build/Debug/outDebug"
+      "cwd": "/Users/hari/LearnLang/Cpp",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "Run (No Debug)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
+    },
+    {
+      "name": "Debug with Arguments",
+      "type": "lldb",
+      "request": "launch",
+      "program": "/Users/hari/LearnLang/Cpp/build/Debug/outDebug",
+      "args": ["5", "3", "+"],
+      "console": "integratedTerminal",
+      "preLaunchTask": "build"
     }
   ]
 }

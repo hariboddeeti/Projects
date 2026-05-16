@@ -1,0 +1,1926 @@
+\documentclass[12pt,a4paper]{article}
+
+% ── Packages ──
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{tcolorbox}
+
+\geometry{margin=2.5cm}
+\hypersetup{colorlinks=true, linkcolor=blue!60!black, urlcolor=blue!60!black}
+
+% ── Header / Footer ──
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\textit{Rotations}}
+\fancyhead[R]{\textit{GNC Fundamentals}}
+\fancyfoot[C]{\thepage}
+
+% ── Custom boxes ──
+\newtcolorbox{keybox}[1][]{colback=blue!5!white, colframe=blue!50!black,
+  fonttitle=\bfseries, title=#1}
+
+\newtcolorbox{warningbox}[1][]{colback=red!5!white, colframe=red!50!black,
+  fonttitle=\bfseries, title=#1}
+
+% ── MATLAB listing style ──
+\lstdefinestyle{matlab}{
+  language=Matlab,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue},
+  commentstyle=\color{green!50!black},
+  stringstyle=\color{red!70!black},
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  frame=single,
+  breaklines=true,
+  captionpos=b
+}
+
+% ── Title ──
+\title{\textbf{Rotations: Euler Angles, Gimbal Lock,\\[0.3em]
+       and Quaternions}\\[0.5em]
+       \large A Comprehensive Guide for GNC Engineers}
+\author{}
+\date{April 2026}
+
+\renewcommand{\contentsname}{Index}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\newpage
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Euler Angle Rotations}
+% ══════════════════════════════════════════════════════════════════════════════
+
+Any orientation in 3D space can be described by a sequence of three successive
+rotations about coordinate axes. These are called \textbf{Euler angles}. The
+two fundamental conventions for defining these rotations are
+\emph{intrinsic} and \emph{extrinsic}.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Rotation Convention: Right-Hand Rule}
+% ──────────────────────────────────────────────────────────────────────────────
+
+This document uses the \textbf{right-hand rule} throughout, which is the
+standard convention in aerospace, GNC, and most engineering disciplines.
+
+\begin{keybox}[Right-Hand Rule]
+Point your \textbf{right thumb} along the positive direction of the rotation
+axis. Your fingers curl in the direction of \textbf{positive rotation}
+(counter-clockwise when viewed from the tip of the axis).
+\end{keybox}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{Right-Hand Rule} & \textbf{Left-Hand Rule} \\
+\midrule
+Positive rotation & Counter-clockwise (looking down axis) &
+  Clockwise (looking down axis) \\
+Cross product     & $\hat{x}\times\hat{y}=+\hat{z}$ &
+  $\hat{x}\times\hat{y}=-\hat{z}$ \\
+Used in           & Aerospace, physics, most GNC &
+  Some computer graphics (e.g.\ DirectX) \\
+Matrix form       & $\sin\theta$ terms as shown below &
+  $\sin\theta$ terms negated \\
+\bottomrule
+\end{tabular}
+\caption{Right-hand vs.\ left-hand rotation conventions.}
+\end{table}
+
+\begin{warningbox}[Convention matters]
+Mixing right-hand and left-hand conventions silently negates rotation
+directions. Always verify which convention your codebase, sensor, and
+simulation tool use before combining rotations.
+\end{warningbox}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Elementary Rotation Matrices}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Using the right-hand rule, the three elementary (principal-axis) rotation
+matrices are:
+
+\subsubsection*{Rotation about the X-axis by angle $\phi$ (roll)}
+
+\begin{equation}
+  R_X(\phi) = \begin{pmatrix}
+    1 & 0          & 0           \\
+    0 & \cos\phi  & \sin\phi   \\
+    0 & -\sin\phi & \cos\phi
+  \end{pmatrix}
+  \label{eq:Rx}
+\end{equation}
+
+\subsubsection*{Rotation about the Y-axis by angle $\theta$ (pitch)}
+
+\begin{equation}
+  R_Y(\theta) = \begin{pmatrix}
+    \cos\theta  & 0 & -\sin\theta \\
+    0            & 1 & 0            \\
+    \sin\theta  & 0 & \cos\theta
+  \end{pmatrix}
+  \label{eq:Ry}
+\end{equation}
+
+\subsubsection*{Rotation about the Z-axis by angle $\psi$ (yaw)}
+
+\begin{equation}
+  R_Z(\psi) = \begin{pmatrix}
+    \cos\psi  & \sin\psi  & 0 \\
+    -\sin\psi & \cos\psi  & 0 \\
+    0          & 0           & 1
+  \end{pmatrix}
+  \label{eq:Rz}
+\end{equation}
+
+\begin{keybox}[Sign pattern]
+In the right-hand convention for nav-to-body matrices, the $\sin$ term with
+the \textbf{negative sign} appears:
+\begin{itemize}
+  \item $R_X$: row 3, column 2 \quad ($-\sin\phi$)
+  \item $R_Y$: row 1, column 3 \quad ($-\sin\theta$)
+  \item $R_Z$: row 2, column 1 \quad ($-\sin\psi$)
+\end{itemize}
+For a left-hand convention, these signs flip.
+\end{keybox}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Intrinsic Rotations}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Intrinsic rotations are performed about the \textbf{axes of the rotating body}
+(body-fixed frame). Each successive rotation occurs about an axis that has been
+updated by the previous rotation.
+
+For the \textbf{ZYX intrinsic sequence} (common in aerospace as
+yaw--pitch--roll):
+
+\begin{equation}
+  R = R_Z(\psi)\; R_Y(\theta)\; R_X(\phi)
+\end{equation}
+
+\begin{enumerate}
+  \item Rotate about the body's \textbf{Z} axis by $\psi$ (yaw).
+  \item Rotate about the \textbf{new $Y'$} axis by $\theta$ (pitch).
+  \item Rotate about the \textbf{new $X''$} axis by $\phi$ (roll).
+\end{enumerate}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Extrinsic Rotations}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Extrinsic rotations are performed about the \textbf{axes of the fixed/world
+frame}. The axes never change between rotations.
+
+For the \textbf{XYZ extrinsic sequence}:
+
+\begin{equation}
+  R = R_Z(\gamma)\; R_Y(\beta)\; R_X(\alpha)
+\end{equation}
+
+\begin{enumerate}
+  \item Rotate about the fixed \textbf{X} axis by $\alpha$.
+  \item Rotate about the fixed \textbf{Y} axis by $\beta$.
+  \item Rotate about the fixed \textbf{Z} axis by $\gamma$.
+\end{enumerate}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Key Equivalence}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{keybox}[Intrinsic--Extrinsic Equivalence]
+An \textbf{intrinsic} rotation sequence in order $A$-$B$-$C$ produces the
+\textbf{same} result as an \textbf{extrinsic} rotation in the
+\textbf{reversed} order $C$-$B$-$A$ with the same angles:
+%
+\begin{equation}
+  R_{\text{intrinsic}}(Z\text{-}Y\text{-}X)
+  \;=\; R_{\text{extrinsic}}(X\text{-}Y\text{-}Z)
+\end{equation}
+\end{keybox}
+
+This holds because:
+\begin{itemize}
+  \item \textbf{Intrinsic}: multiply rotation matrices left-to-right in the
+        order applied $\;\Rightarrow\; R_Z \cdot R_Y \cdot R_X$.
+  \item \textbf{Extrinsic}: multiply rotation matrices right-to-left in the
+        order applied $\;\Rightarrow\;$ same product $R_Z \cdot R_Y \cdot R_X$.
+\end{itemize}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+ & \textbf{Intrinsic} & \textbf{Extrinsic} \\
+\midrule
+Axes          & Body-fixed (rotate with body)  & World-fixed (stationary) \\
+Matrix order  & Multiply in sequence order     & Multiply in reverse order \\
+Common use    & Aerospace (yaw--pitch--roll)   & Animation, some robotics \\
+Gimbal lock   & Middle rotation $= \pm 90°$   & Same condition, same angles \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of intrinsic and extrinsic conventions.}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Nav-to-Body or Body-to-Nav?}
+% ══════════════════════════════════════════════════════════════════════════════
+
+With the standard intrinsic ZYX convention the composed matrix
+
+\begin{equation}
+  R_{\text{intrinsic}} = R_Z(\psi)\; R_Y(\theta)\; R_X(\phi)
+\end{equation}
+
+is the \textbf{nav-to-body} (world-to-body) rotation matrix. It transforms a
+vector from the navigation/world frame into the body frame:
+
+\begin{equation}
+  \vec{v}_{\text{body}} = R_{\text{intrinsic}}\;\vec{v}_{\text{nav}}
+\end{equation}
+
+To go \textbf{body-to-nav}, use the transpose (rotation matrices are
+orthogonal, so $R^{-1} = R^T$):
+
+\begin{equation}
+  R_{\text{body}\to\text{nav}} = R_{\text{intrinsic}}^T
+    = R_X(-\phi)\; R_Y(-\theta)\; R_Z(-\psi)
+\end{equation}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Expanded Nav-to-Body Matrix (ZYX)}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Multiplying $R_Z(\psi)\,R_Y(\theta)\,R_X(\phi)$ using the elementary
+matrices from Equations~\eqref{eq:Rz},~\eqref{eq:Ry},~\eqref{eq:Rx}:
+
+\begin{equation}
+\boxed{
+  R_{\text{nav}\to\text{body}} =
+  \begin{pmatrix}
+    \cos\theta\cos\psi &
+    \cos\theta\sin\psi &
+    -\sin\theta \\
+    \sin\phi\sin\theta\cos\psi - \cos\phi\sin\psi &
+    \sin\phi\sin\theta\sin\psi + \cos\phi\cos\psi &
+    \sin\phi\cos\theta \\
+    \cos\phi\sin\theta\cos\psi + \sin\phi\sin\psi &
+    \cos\phi\sin\theta\sin\psi - \sin\phi\cos\psi &
+    \cos\phi\cos\theta
+  \end{pmatrix}
+}
+\label{eq:nav2body}
+\end{equation}
+
+where $\psi$ = yaw, $\theta$ = pitch, $\phi$ = roll (all right-hand
+positive).
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Expanded Body-to-Nav Matrix (ZYX)}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Since $R$ is orthogonal, $R_{\text{body}\to\text{nav}} =
+R_{\text{nav}\to\text{body}}^T$:
+
+\begin{equation}
+\boxed{
+  R_{\text{body}\to\text{nav}} =
+  \begin{pmatrix}
+    \cos\theta\cos\psi &
+    \sin\phi\sin\theta\cos\psi - \cos\phi\sin\psi &
+    \cos\phi\sin\theta\cos\psi + \sin\phi\sin\psi \\
+    \cos\theta\sin\psi &
+    \sin\phi\sin\theta\sin\psi + \cos\phi\cos\psi &
+    \cos\phi\sin\theta\sin\psi - \sin\phi\cos\psi \\
+    -\sin\theta &
+    \sin\phi\cos\theta &
+    \cos\phi\cos\theta
+  \end{pmatrix}
+}
+\label{eq:body2nav}
+\end{equation}
+
+\begin{keybox}[Quick check]
+At zero attitude ($\psi=\theta=\phi=0$), both matrices reduce to the
+$3\times3$ identity, confirming body frame $=$ nav frame.
+\end{keybox}
+
+\begin{keybox}[Why nav-to-body?]
+The intrinsic ZYX sequence describes how to rotate \emph{from} the nav frame
+\emph{into} the body frame: first yaw about nav Z, then pitch about the
+intermediate $Y'$, then roll about the final body $X''$. The composed matrix
+maps nav-frame coordinates into the resulting body frame.
+\end{keybox}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Passive vs.\ Active --- Two Conventions, Same Product Order}
+% ──────────────────────────────────────────────────────────────────────────────
+
+The product $R_Z(\psi)\,R_Y(\theta)\,R_X(\phi)$ can yield \emph{either}
+nav-to-body or body-to-nav, depending on how the elementary matrices are
+defined. Both use the right-hand rule and the \textbf{same multiplication
+order}; the only difference is the \textbf{sign of $\sin$} in each
+elementary matrix.
+
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+\subsubsection*{GNC Aerospace Convention --- Passive (Alias)}
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+Standard aerospace textbooks (Titterton \& Weston, Stevens \& Lewis, etc.)
+use the \textbf{passive} (alias) elementary matrices listed in
+Equations~\eqref{eq:Rz}--\eqref{eq:Rx}:
+
+\begin{equation}
+  R_Z^{(P)}(\psi) = \begin{pmatrix}
+    \cos\psi  & \sin\psi  & 0 \\
+    -\sin\psi & \cos\psi  & 0 \\
+    0          & 0          & 1
+  \end{pmatrix}
+  \quad (+\sin\text{ above diagonal})
+  \label{eq:RzP}
+\end{equation}
+
+The composed product gives the \textbf{nav-to-body} direction-cosine matrix:
+
+\begin{equation}
+\boxed{
+  R_Z^{(P)}\, R_Y^{(P)}\, R_X^{(P)}
+  \;=\; C_n^b
+  \quad\text{(nav-to-body)}
+}
+\end{equation}
+
+Meaning: the matrix \emph{re-expresses} a stationary vector in the rotated
+body frame.  The frame moves; the vector stays.
+
+\[
+  \vec{v}_{\text{body}} = C_n^b \;\vec{v}_{\text{nav}}
+\]
+
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+\subsubsection*{CTCT Convention --- Active (Alibi)}
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+The CTCT codebase (e.g.\ \texttt{Rotation\_Matrix.m},
+\texttt{DozerMinMaxYawCalTestHelpers.h}, autocode \texttt{Rot\_Mtrx\_YRP})
+uses \textbf{active} (alibi) elementary matrices with the opposite $\sin$
+sign.
+
+\begin{warningbox}[CTCT Angle Naming]
+CTCT uses non-standard angle names relative to aerospace:
+\begin{center}
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Axis} & \textbf{Aerospace name} & \textbf{CTCT name} & \textbf{Symbol} \\
+\midrule
+Z & Yaw   & Yaw   & $\psi$ \\
+Y & Pitch & Roll  & $\phi_R$ \\
+X & Roll  & Pitch & $\theta_P$ \\
+\bottomrule
+\end{tabular}
+\end{center}
+The intrinsic sequence is therefore
+\textbf{Yaw--Roll--Pitch} in CTCT terminology
+vs.\ \textbf{Yaw--Pitch--Roll} in aerospace.
+The matrix product $R_Z\,R_Y\,R_X$ is identical---only the labels differ.
+\end{warningbox}
+
+The three CTCT active elementary matrices are:
+
+\subsubsection*{CTCT: Rotation about Z by $\psi$ (Yaw)}
+
+\begin{equation}
+  R_Z^{(A)}(\psi) = \begin{pmatrix}
+    \cos\psi  & -\sin\psi & 0 \\
+    \sin\psi  & \cos\psi  & 0 \\
+    0          & 0          & 1
+  \end{pmatrix}
+  \quad (+\sin\text{ below diagonal})
+  \label{eq:RzA}
+\end{equation}
+
+\subsubsection*{CTCT: Rotation about Y by $\phi_R$ (Roll)}
+
+\begin{equation}
+  R_Y^{(A)}(\phi_R) = \begin{pmatrix}
+    \cos\phi_R  & 0 & \sin\phi_R \\
+    0            & 1 & 0            \\
+    -\sin\phi_R & 0 & \cos\phi_R
+  \end{pmatrix}
+  \label{eq:RyA}
+\end{equation}
+
+\subsubsection*{CTCT: Rotation about X by $\theta_P$ (Pitch)}
+
+\begin{equation}
+  R_X^{(A)}(\theta_P) = \begin{pmatrix}
+    1 & 0              & 0               \\
+    0 & \cos\theta_P  & -\sin\theta_P  \\
+    0 & \sin\theta_P  & \cos\theta_P
+  \end{pmatrix}
+  \label{eq:RxA}
+\end{equation}
+
+\begin{keybox}[Active sign pattern]
+Compare with the passive (aerospace) elementary matrices in
+Equations~\eqref{eq:Rx}--\eqref{eq:Rz}: each active matrix is the
+\textbf{transpose} of its passive counterpart.
+The $-\sin$ terms move to the opposite off-diagonal position:
+\begin{itemize}
+  \item $R_X^{(A)}$: $-\sin\theta_P$ at row 2, col 3 \quad
+        (passive: row 3, col 2)
+  \item $R_Y^{(A)}$: $-\sin\phi_R$ at row 3, col 1 \quad
+        (passive: row 1, col 3)
+  \item $R_Z^{(A)}$: $-\sin\psi$ at row 1, col 2 \quad
+        (passive: row 2, col 1)
+\end{itemize}
+\end{keybox}
+
+Using the \textbf{same multiplication order} $R_Z\,R_Y\,R_X$ gives the
+\textbf{body-to-nav} matrix:
+
+\begin{equation}
+\boxed{
+  R_Z^{(A)}(\psi)\, R_Y^{(A)}(\phi_R)\, R_X^{(A)}(\theta_P)
+  \;=\; C_b^n
+  \quad\text{(body-to-nav)}
+}
+\end{equation}
+
+Meaning: the matrix physically \emph{moves} a body-frame vector into the nav
+frame.  The vector moves; the frame stays.
+
+\[
+  \vec{v}_{\text{nav}} = C_b^n \;\vec{v}_{\text{body}}
+\]
+
+\subsubsection*{Expanded CTCT Body-to-Nav Matrix}
+
+Multiplying $R_Z^{(A)}(\psi)\,R_Y^{(A)}(\phi_R)\,R_X^{(A)}(\theta_P)$:
+
+\begin{equation}
+\boxed{
+  C_b^n =
+  \begin{pmatrix}
+    \cos\phi_R\cos\psi &
+    -\cos\theta_P\sin\psi + \sin\theta_P\sin\phi_R\cos\psi &
+    \sin\theta_P\sin\psi + \cos\theta_P\sin\phi_R\cos\psi \\[4pt]
+    \cos\phi_R\sin\psi &
+    \cos\theta_P\cos\psi + \sin\theta_P\sin\phi_R\sin\psi &
+    -\sin\theta_P\cos\psi + \cos\theta_P\sin\phi_R\sin\psi \\[4pt]
+    -\sin\phi_R &
+    \sin\theta_P\cos\phi_R &
+    \cos\theta_P\cos\phi_R
+  \end{pmatrix}
+}
+\label{eq:ctct-body2nav}
+\end{equation}
+
+where $\psi$ = Yaw, $\phi_R$ = Roll (CTCT, about Y), $\theta_P$ = Pitch
+(CTCT, about X).  This is the \textbf{transpose} of the aerospace
+nav-to-body matrix (Eq.~\ref{eq:nav2body}) with the CTCT naming applied.
+
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+\subsubsection*{Why the Same Order Gives Transposes}
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+Each active elementary matrix is the transpose of its passive counterpart:
+$R_{\text{axis}}^{(A)} = \bigl(R_{\text{axis}}^{(P)}\bigr)^T$.
+
+A composed product of individually-transposed factors is \textbf{not} the
+same as transposing the whole product---the algebraic transpose rule
+$(ABC)^T = C^T B^T A^T$ reverses the order.  So how can the same-order
+active product equal the transpose of the same-order passive product?
+
+The answer is that the expanded $3\times3$ matrix happens to satisfy the
+identity:
+
+\begin{equation}
+\boxed{
+  R_Z^{(A)}\, R_Y^{(A)}\, R_X^{(A)}
+  \;=\;
+  \bigl(R_Z^{(P)}\, R_Y^{(P)}\, R_X^{(P)}\bigr)^T
+}
+\label{eq:same-order-transpose}
+\end{equation}
+
+This can be verified element-by-element: flipping the sign of every $\sin$
+term in every elementary matrix and then multiplying in the same order
+produces exactly the transpose of the passive product.
+
+\begin{keybox}[Numerical verification]
+At $\psi=30^\circ,\;\theta=20^\circ,\;\phi=10^\circ$:
+\begin{tabular}{@{}ll@{}}
+$C_n^b = R_Z^{(P)} R_Y^{(P)} R_X^{(P)}$: &
+  $(1,2) = +0.4699,\; (2,1) = -0.4410$ \\
+$C_b^n = R_Z^{(A)} R_Y^{(A)} R_X^{(A)}$: &
+  $(1,2) = -0.4410,\; (2,1) = +0.4699$ \\
+\end{tabular}\\[4pt]
+These are transposes of each other.  The reversed-order product
+$R_X^{(A)} R_Y^{(A)} R_Z^{(A)}$ gives $(1,2) = -0.4699,\; (2,1) = +0.5438$
+---a \textbf{completely different} matrix.
+\end{keybox}
+
+\subsubsection*{Reconciling with the Transpose Reversal Rule}
+
+The algebraic identity $(ABC)^T = C^T B^T A^T$ is always true.  So:
+
+\begin{equation}
+  \bigl(R_Z^{(P)} R_Y^{(P)} R_X^{(P)}\bigr)^T
+  = R_X^{(A)}\, R_Y^{(A)}\, R_Z^{(A)}
+  \qquad\text{(reversed order, purely algebraic)}
+\end{equation}
+
+This reversed product $R_X^{(A)} R_Y^{(A)} R_Z^{(A)}$ is an $X$-$Y$-$Z$
+rotation sequence---a \emph{different} set of physical rotations than
+$Z$-$Y$-$X$.  Meanwhile, the same-order product
+$R_Z^{(A)} R_Y^{(A)} R_X^{(A)}$ is a $Z$-$Y$-$X$ sequence with
+individually-transposed factors.  Both happen to produce the \emph{same}
+numerical matrix (which is $C_b^n$), but through different mathematical
+paths.  There is no contradiction.
+
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+\subsubsection*{Side-by-Side Comparison}
+% ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{3.8cm}p{5cm}p{5cm}@{}}
+\toprule
+ & \textbf{GNC Aerospace (Passive)} & \textbf{CTCT (Active)} \\
+\midrule
+Elementary $R_Z$ &
+  $+\sin\psi$ above diagonal &
+  $+\sin\psi$ below diagonal \\[4pt]
+Product order &
+  $R_Z\, R_Y\, R_X$ &
+  $R_Z\, R_Y\, R_X$ \textbf{(same)} \\[4pt]
+Result of product &
+  $C_n^b$ (nav-to-body) &
+  $C_b^n$ (body-to-nav) \\[4pt]
+To get the other direction &
+  Transpose: $C_b^n = (C_n^b)^T$ &
+  Transpose: $C_n^b = (C_b^n)^T$ \\[4pt]
+Key relationship &
+  \multicolumn{2}{c}{$R_Z^{(A)} R_Y^{(A)} R_X^{(A)}
+  = \bigl(R_Z^{(P)} R_Y^{(P)} R_X^{(P)}\bigr)^T$} \\
+\bottomrule
+\end{tabular}
+\caption{GNC Aerospace vs.\ CTCT conventions---same product order,
+transposed elementary matrices, transposed result.}
+\end{table}
+
+\begin{warningbox}[Common pitfall]
+Both conventions are right-hand positive and use the same matrix product
+order $R_Z\,R_Y\,R_X$. The \emph{only} difference is the sign of $\sin$ in
+the elementary matrices. Mixing conventions silently transposes the result,
+which can appear as a sign error in yaw or roll and is notoriously hard to
+debug.
+\end{warningbox}
+
+\subsubsection*{Quick Diagnostic}
+
+Compute $R_Z(90^\circ)\,\hat{x}$ where $\hat{x}=[1,0,0]^T$:
+\begin{itemize}
+  \item \textbf{GNC Aerospace} (passive): result $= [0,\,-1,\,0]^T$
+        $\;\Rightarrow\;$ the nav $\hat{x}$ has body coordinate $-\hat{y}$
+        (nav-to-body).
+  \item \textbf{CTCT} (active): result $= [0,\,+1,\,0]^T$
+        $\;\Rightarrow\;$ the body $\hat{x}$ points along nav $+\hat{y}$
+        (body-to-nav).
+\end{itemize}
+
+\begin{keybox}[This document's convention]
+All matrices in this document use the \textbf{GNC Aerospace} (passive)
+convention. Therefore $R_Z(\psi)\,R_Y(\theta)\,R_X(\phi) = C_n^b$.
+The body-to-nav matrix is obtained via transpose: $C_b^n = (C_n^b)^T$.
+\end{keybox}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Active vs.\ Passive --- Worked Example}
+% ──────────────────────────────────────────────────────────────────────────────
+
+To make the distinction concrete, consider a single $90^\circ$ yaw rotation
+applied to a vector $\vec{v}=[1,0,0]^T$ (pointing along the $X$-axis).
+
+\subsubsection*{Active (CTCT) --- ``Move the vector''}
+
+The vector physically rotates within a \textbf{fixed} frame.  The coordinate
+axes do not move; the arrow does.
+
+\begin{equation}
+  R_Z^{(\text{active})}(90^\circ)
+  = \begin{pmatrix}
+      \cos 90^\circ & -\sin 90^\circ & 0 \\
+      \sin 90^\circ &  \cos 90^\circ & 0 \\
+      0             &  0             & 1
+    \end{pmatrix}
+  = \begin{pmatrix} 0 & -1 & 0 \\ 1 & 0 & 0 \\ 0 & 0 & 1 \end{pmatrix}
+\end{equation}
+
+\begin{equation}
+  \vec{v}' = R_Z^{(\text{active})}(90^\circ)\,\vec{v}
+  = \begin{pmatrix} 0\\1\\0 \end{pmatrix}
+\end{equation}
+
+The arrow that was pointing along $+X$ now points along $+Y$.
+The axes did not move.
+
+\begin{verbatim}
+  Y                        Y
+  |                        |
+  |                        ^ v' = [0,1,0]
+  |                        |
+  +----> v = [1,0,0]  ->  +--------
+       X  (fixed)               X  (fixed)
+
+  BEFORE                   AFTER (active / CTCT)
+\end{verbatim}
+
+\emph{Think of it as:} you are standing still, watching an arrow on the ground
+rotate in front of you.
+
+\subsubsection*{Passive (GNC Aerospace) --- ``Move the frame''}
+
+The vector stays \textbf{fixed in space}.  The coordinate frame rotates
+underneath it, and we re-read the vector's coordinates in the new frame.
+
+\begin{equation}
+  R_Z^{(\text{passive})}(90^\circ)
+  = \begin{pmatrix}
+      \cos 90^\circ &  \sin 90^\circ & 0 \\
+     -\sin 90^\circ &  \cos 90^\circ & 0 \\
+      0             &  0             & 1
+    \end{pmatrix}
+  = \begin{pmatrix} 0 & 1 & 0 \\ -1 & 0 & 0 \\ 0 & 0 & 1 \end{pmatrix}
+\end{equation}
+
+\begin{equation}
+  \vec{v}_{\text{new}} = R_Z^{(\text{passive})}(90^\circ)\,\vec{v}
+  = \begin{pmatrix} 0\\-1\\0 \end{pmatrix}
+\end{equation}
+
+The arrow is still pointing the same direction in space, but we rotated the
+coordinate frame $90^\circ$ CCW.  In this new frame the original arrow is at
+$[0,-1,0]^T$---it points along $-Y'$.
+
+\begin{verbatim}
+  Y                        X'
+  |                        |
+  |                        |
+  |                        |
+  +----> v = [1,0,0]  ->  ---+--------
+       X  (fixed)             |        Y'
+                              |
+                              v  v_new = [0,-1,0]
+
+  BEFORE                   AFTER (passive / GNC Aerospace)
+  (old frame)              (new frame rotated 90 deg CCW)
+\end{verbatim}
+
+\emph{Think of it as:} the arrow is nailed to the floor.  You rotate yourself
+$90^\circ$ CCW.  From your new perspective the arrow that was ``forward'' is
+now to your right---it reads $[0,-1,0]^T$ in your rotated frame.
+
+\subsubsection*{Key Relationship}
+
+The two matrices are \textbf{transposes} of each other for the same physical
+rotation:
+
+\begin{equation}
+\boxed{
+  R^{(\text{passive})} = \bigl(R^{(\text{active})}\bigr)^T
+}
+\end{equation}
+
+Verify:
+\[
+  \begin{pmatrix} 0&1&0\\-1&0&0\\0&0&1 \end{pmatrix}
+  = \begin{pmatrix} 0&-1&0\\1&0&0\\0&0&1 \end{pmatrix}^T
+  \quad\checkmark
+\]
+
+\subsubsection*{3-D GNC Example}
+
+An aircraft has yaw $\psi=90^\circ$ (nose pointing East).  A GPS gives
+velocity in the nav frame: $\vec{v}_{\text{nav}} = [5,0,0]^T$\,m/s (moving
+North).
+
+\begin{itemize}
+  \item \textbf{CTCT (Active)} --- ``Where does the body $\hat{x}$ point in
+        nav?''
+    \[
+      R_Z^{(A)}(90^\circ)\begin{pmatrix}1\\0\\0\end{pmatrix}
+      = \begin{pmatrix}0\\1\\0\end{pmatrix}
+    \]
+    Body $\hat{x}$ points along nav $+Y$ (East).\quad This is $C_b^n$.
+
+  \item \textbf{GNC Aerospace (Passive)} --- ``What is the nav velocity in
+        body coords?''
+    \[
+      R_Z^{(P)}(90^\circ)\begin{pmatrix}5\\0\\0\end{pmatrix}
+      = \begin{pmatrix}0\\-5\\0\end{pmatrix}
+    \]
+    The 5\,m/s North velocity appears as $-5$\,m/s along body $Y$ (coming
+    from the right).\quad This is $C_n^b$.
+\end{itemize}
+
+\subsubsection*{Summary}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{2.5cm}p{5.5cm}p{5.5cm}@{}}
+\toprule
+ & \textbf{CTCT (Active/Alibi)} & \textbf{GNC Aerospace (Passive/Alias)} \\
+\midrule
+What moves?   & The vector             & The coordinate frame \\
+What stays?   & The frame              & The vector \\
+Result        & $\vec{v}'=R^{(A)}\vec{v}$ &
+                $\vec{v}_{\text{new}}=R^{(P)}\vec{v}_{\text{old}}$ \\
+GNC use       & $C_b^n$ (body-to-nav)  & $C_n^b$ (nav-to-body) \\
+Relationship  & \multicolumn{2}{c}{$R^{(P)} = (R^{(A)})^T$ --- same physics,
+                different bookkeeping} \\
+\bottomrule
+\end{tabular}
+\caption{Active vs.\ passive rotation at a glance.}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Intrinsic/Extrinsic vs.\ Active/Passive --- Two Independent Choices}
+% ──────────────────────────────────────────────────────────────────────────────
+
+These two pairs of terms are often confused, but they answer
+\textbf{different, independent questions}:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{4.5cm}p{4.5cm}p{4.5cm}@{}}
+\toprule
+ & \textbf{What it decides} & \textbf{Options} \\
+\midrule
+Intrinsic vs.\ Extrinsic &
+  Which \textbf{axes} to rotate about &
+  Body-fixed (moving) vs.\ World-fixed (stationary) \\
+Active vs.\ Passive &
+  What the matrix \textbf{does} to a vector &
+  Rotates the vector vs.\ Re-expresses it in a new frame \\
+\bottomrule
+\end{tabular}
+\caption{The two independent convention choices.}
+\end{table}
+
+\subsubsection*{Intrinsic vs.\ Extrinsic --- ``About which axes?''}
+
+This determines the \textbf{sequence of axes}:
+
+\begin{itemize}
+  \item \textbf{Intrinsic (body-fixed):} Each rotation is about the
+        \emph{current} body axis, which moves with each step.\\
+        \emph{``Yaw about body Z, then pitch about the new $Y'$, then roll
+        about the new $X''$.''}
+  \item \textbf{Extrinsic (world-fixed):} Each rotation is about the
+        \emph{original} fixed world axis.\\
+        \emph{``Rotate about fixed X, then fixed Y, then fixed Z.''}
+\end{itemize}
+
+Key fact: Intrinsic $Z$-$Y$-$X$ $=$ Extrinsic $X$-$Y$-$Z$ (reversed axis
+order, same matrix product $R_Z\,R_Y\,R_X$).  This choice affects
+\textbf{only the multiplication order}, nothing else.
+
+\subsubsection*{Active vs.\ Passive --- ``What does the matrix do?''}
+
+This determines the \textbf{meaning of the result}:
+
+\begin{itemize}
+  \item \textbf{Active (alibi):} The matrix physically \emph{moves} the
+        vector to a new position within the same coordinate frame.
+        \[
+          \vec{v}' = R\,\vec{v}
+          \quad\text{--- the vector rotates, the frame stays.}
+        \]
+  \item \textbf{Passive (alias):} The matrix \emph{re-expresses} the same
+        (stationary) vector in a different coordinate frame.
+        \[
+          \vec{v}_{\text{new frame}} = R\,\vec{v}_{\text{old frame}}
+          \quad\text{--- the frame rotates, the vector stays.}
+        \]
+\end{itemize}
+
+This choice affects \textbf{only the sign of $\sin$} in the elementary
+matrices (active and passive are transposes of each other).
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Intrinsic/Extrinsic for GNC Aerospace vs.\ CTCT}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Both GNC Aerospace and CTCT use the \textbf{same} axis sequence
+(intrinsic $Z$-$Y$-$X$) and the \textbf{same} matrix product
+$R_Z\,R_Y\,R_X$.  The only naming difference is which physical quantity
+is assigned to the Y-axis and X-axis rotations.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{3.5cm}p{5cm}p{5cm}@{}}
+\toprule
+ & \textbf{GNC Aerospace} & \textbf{CTCT} \\
+\midrule
+Axis sequence &
+  Intrinsic $Z$-$Y$-$X$ &
+  Intrinsic $Z$-$Y$-$X$ \textbf{(same)} \\
+Extrinsic equivalent &
+  Extrinsic $X$-$Y$-$Z$ &
+  Extrinsic $X$-$Y$-$Z$ \textbf{(same)} \\
+Product form &
+  $R_Z\,R_Y\,R_X$ &
+  $R_Z\,R_Y\,R_X$ \textbf{(same)} \\
+\midrule
+\multicolumn{3}{@{}l}{\textbf{Angle--axis assignment (where they differ):}} \\[4pt]
+Z-axis rotation &
+  Yaw ($\psi$) &
+  Yaw ($\psi$) \textbf{(same)} \\
+Y-axis rotation &
+  Pitch ($\theta$) &
+  Roll ($\phi_R$) \textbf{(swapped)} \\
+X-axis rotation &
+  Roll ($\phi$) &
+  Pitch ($\theta_P$) \textbf{(swapped)} \\
+\midrule
+Intrinsic order &
+  Yaw $\to$ Pitch $\to$ Roll &
+  Yaw $\to$ Roll $\to$ Pitch \\
+Extrinsic order &
+  Roll $\to$ Pitch $\to$ Yaw &
+  Pitch $\to$ Roll $\to$ Yaw \\
+\bottomrule
+\end{tabular}
+\caption{Intrinsic/extrinsic comparison---same axis sequence
+$Z$-$Y$-$X$ and same matrix product, but different angle names for
+the Y and X axes.}
+\end{table}
+
+The intrinsic/extrinsic choice is \textbf{not} where the two conventions
+differ.  They differ in (1)~active vs.\ passive and
+(2)~which physical angle (pitch or roll) is assigned to the Y and X axes.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Active/Passive for GNC Aerospace vs.\ CTCT}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Here is where the conventions diverge:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{3.8cm}p{5cm}p{5cm}@{}}
+\toprule
+ & \textbf{GNC Aerospace} & \textbf{CTCT} \\
+\midrule
+Interpretation &
+  Passive (alias) &
+  Active (alibi) \\
+$R_Z$ sign pattern &
+  $+\sin$ above diagonal (row 1, col 2) &
+  $+\sin$ below diagonal (row 2, col 1) \\
+Product $R_Z R_Y R_X$ yields &
+  $C_n^b$ (nav-to-body) &
+  $C_b^n$ (body-to-nav) \\
+What the matrix does &
+  Re-expresses vector in body frame &
+  Moves body vector into nav frame \\
+To get the other direction &
+  Transpose &
+  Transpose \\
+\bottomrule
+\end{tabular}
+\caption{Active/passive comparison---the \textbf{only} difference between
+GNC Aerospace and CTCT.  Same angles, same order, transposed result.}
+\end{table}
+
+\begin{keybox}[Summary]
+GNC Aerospace and CTCT use the \emph{same} rotation sequence (intrinsic
+$Z$-$Y$-$X$) and the \emph{same} product order ($R_Z\,R_Y\,R_X$).
+They differ \emph{only} in active vs.\ passive: each elementary matrix
+is the transpose of the other convention's, and the composed result is
+the transpose.
+
+\[
+  \underbrace{R_Z^{(A)} R_Y^{(A)} R_X^{(A)}}_{\text{CTCT: }C_b^n}
+  \;=\;
+  \underbrace{\bigl(R_Z^{(P)} R_Y^{(P)} R_X^{(P)}\bigr)^T}_{\text{Transpose of Aerospace: }(C_n^b)^T}
+\]
+\end{keybox}
+
+\begin{warningbox}[CTCT Pitch/Roll Name Swap]
+In CTCT code the Y-axis angle is called ``Roll'' and the X-axis angle
+is called ``Pitch''---\textbf{swapped} relative to standard aerospace.
+This applies to \texttt{Rotation\_Matrix.m},
+\texttt{Calc\_Rotation\_NF\_Pltfrm1}, \texttt{EulerXYZBasis}, and most
+autocode.  Newer C++ components (\texttt{DozerMinMaxYawCalibration})
+use standard aerospace naming.  Always check which naming convention
+a given file uses.
+\end{warningbox}
+
+\begin{keybox}[This document's choices]
+\textbf{Intrinsic ZYX} (body-fixed axes) $+$ \textbf{Passive} (alias)
+$\;\Longrightarrow\; R_Z\,R_Y\,R_X = C_n^b$ (nav-to-body).
+\end{keybox}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Gimbal Lock}
+% ══════════════════════════════════════════════════════════════════════════════
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Definition}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Gimbal lock occurs when two of the three rotation axes align, causing the
+system to \textbf{lose one degree of freedom}. The representation collapses
+from 3 independent rotations to effectively 2.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{When Does It Happen?}
+% ──────────────────────────────────────────────────────────────────────────────
+
+For the intrinsic ZYX sequence, gimbal lock occurs when the \textbf{middle
+angle} (pitch) reaches
+
+\begin{equation}
+  \theta = \pm\,90^\circ
+\end{equation}
+
+At $\theta = 90^\circ$ the Z and X axes become aligned, and yaw and roll
+become indistinguishable---only their \emph{sum or difference} matters.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Axis Alignment at the Singularity}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Starting with body frame $=$ nav frame (Z up, X forward, Y right):
+
+\subsubsection*{Case 1: $\theta = +90^\circ$ (Nose Straight Up)}
+
+After pitching by $+90^\circ$ about $Y'$:
+
+\[
+R_Y(90^\circ) = \begin{pmatrix} 0 & 0 & 1 \\ 0 & 1 & 0 \\ -1 & 0 & 0 \end{pmatrix}
+\]
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Body Axis} & \textbf{Points Along (Nav)} & \textbf{Physical Meaning} \\
+\midrule
+$X''$ (forward) & $+Z_{\text{nav}}$ (up)       & Nose pointing straight up \\
+$Y''$ (right)   & $+Y_{\text{nav}}$            & Unchanged \\
+$Z''$ (belly)   & $-X_{\text{nav}}$ (backward) & Belly faces backward \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{warningbox}[Gimbal Lock]
+The body $X''$ axis is now aligned with the nav $Z$ axis:
+\[
+  X''_{\text{body}} \;\|\; Z_{\text{nav}}
+\]
+Roll (about $X''$) and yaw (about $Z_{\text{nav}}$) now rotate about the
+\textbf{same axis}. One degree of freedom is lost.
+\end{warningbox}
+
+\subsubsection*{Case 2: $\theta = -90^\circ$ (Nose Straight Down)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Body Axis} & \textbf{Points Along (Nav)} & \textbf{Physical Meaning} \\
+\midrule
+$X''$ (forward) & $-Z_{\text{nav}}$ (down) & Nose pointing straight down \\
+$Y''$ (right)   & $+Y_{\text{nav}}$        & Unchanged \\
+$Z''$ (belly)   & $+X_{\text{nav}}$ (fwd)  & Belly faces forward \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Again $X'' \| Z_{\text{nav}}$ (anti-parallel). Now $(\psi + \phi)$ is the
+only observable combined parameter.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Proof: Why Exactly One DOF Is Lost}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Expand the full rotation matrix at $\theta = 90^\circ$:
+
+\begin{equation}
+  R = R_Z(\psi)\; R_Y(90^\circ)\; R_X(\phi)
+    = \begin{pmatrix}
+        0 & \sin(\psi - \phi) & \cos(\psi - \phi) \\
+        0 & \cos(\psi - \phi) & -\sin(\psi - \phi) \\
+       -1 & 0                 & 0
+      \end{pmatrix}
+  \label{eq:gimbal}
+\end{equation}
+
+\textbf{Every entry depends only on} $(\psi - \phi)$, never on $\psi$ or
+$\phi$ individually. Therefore infinitely many $(\psi,\phi)$ pairs yield the
+same orientation:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}cccc@{}}
+\toprule
+$\psi$ (yaw) & $\phi$ (roll) & $\psi - \phi$ & Same matrix? \\
+\midrule
+$30^\circ$  & $0^\circ$    & $30^\circ$ & \checkmark \\
+$40^\circ$  & $10^\circ$   & $30^\circ$ & \checkmark \\
+$0^\circ$   & $-30^\circ$  & $30^\circ$ & \checkmark \\
+$100^\circ$ & $70^\circ$   & $30^\circ$ & \checkmark \\
+\bottomrule
+\end{tabular}
+\caption{Multiple Euler angle triples mapping to the same orientation at
+$\theta = 90^\circ$.}
+\end{table}
+
+You have 3 parameters $(\psi, \theta, \phi)$ but only \textbf{2} of them
+independently change the orientation:
+\begin{enumerate}
+  \item $\theta$ --- but it is stuck at $90^\circ$.
+  \item $(\psi - \phi)$ --- one combined number, not two.
+\end{enumerate}
+
+That is \textbf{2 effective DOF}, not 3. One is lost.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Analogy: Latitude and Longitude at the Pole}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Consider a map with latitude and longitude:
+
+\begin{itemize}
+  \item At the \textbf{equator}, changing latitude moves you north/south and
+        changing longitude moves you east/west.
+        \textbf{Two independent directions.}
+  \item At the \textbf{North Pole}, changing longitude does nothing---every
+        longitude passes through the same point. Longitude is meaningless.
+        \textbf{One independent direction only.}
+\end{itemize}
+
+The Euler angle singularity is the same idea. At $\theta = 90^\circ$, $\psi$
+and $\phi$ collapse into a single effective parameter $(\psi - \phi)$, just as
+at the pole all longitudes collapse to one point.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Consequences}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{4cm}p{9cm}@{}}
+\toprule
+\textbf{Effect} & \textbf{Description} \\
+\midrule
+Ambiguous decomposition & Infinitely many $(\psi,\phi)$ pairs produce the
+  same rotation. \\
+Numerical instability & \texttt{atan2}-based extraction becomes
+  ill-conditioned near $\theta = \pm 90^\circ$. \\
+Discontinuous outputs & Small physical rotations produce large jumps in
+  extracted angles. \\
+Not a physical limitation & The orientation itself is fine; only the
+  \emph{Euler angle representation} breaks. \\
+\bottomrule
+\end{tabular}
+\caption{Effects of gimbal lock.}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{What ``Losing a DOF'' Does and Does Not Mean}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\textbf{It does NOT mean:}
+\begin{itemize}[label=$\times$]
+  \item The body cannot physically reach certain orientations.
+  \item The body is stuck or constrained.
+  \item There are only 2 possible directions to move.
+\end{itemize}
+
+\textbf{It DOES mean:}
+\begin{itemize}[label=\checkmark]
+  \item The \emph{representation} (three Euler angles) can no longer uniquely
+        describe orientations near $\theta = 90^\circ$.
+  \item Two of the three angle ``knobs'' ($\psi$ and $\phi$) turn the same
+        physical axis.
+  \item Small physical rotations about one axis produce wild swings or
+        ambiguity in the extracted angles.
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Detection}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{lstlisting}[style=matlab, caption={Detecting gimbal lock in MATLAB.}]
+% After extracting pitch (theta) from a rotation matrix:
+if abs(cos(theta)) < 1e-6
+    warning('Near gimbal lock -- Euler angles unreliable');
+end
+\end{lstlisting}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Mitigation Strategies}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{4cm}p{9cm}@{}}
+\toprule
+\textbf{Approach} & \textbf{Trade-off} \\
+\midrule
+Quaternions & No singularities, 4 parameters, must normalise.
+  Standard in GNC/INS. \\
+Rotation matrices (DCM) & No singularities, 9 parameters (6 redundant),
+  must re-orthogonalise. \\
+Different Euler order & Moves the singularity (e.g.\ ZYZ puts it at
+  $\theta = 0^\circ$), does not eliminate it. \\
+Clamp \& flag & Keep Euler angles for display but clamp $\theta$
+  and flag the degenerate case. \\
+\bottomrule
+\end{tabular}
+\caption{Strategies to avoid or mitigate gimbal lock.}
+\end{table}
+
+\begin{keybox}[Key Takeaway]
+Gimbal lock is an inherent limitation of \textbf{all} 3-parameter attitude
+representations (Euler angles, Rodrigues parameters). It cannot be
+``fixed''---only avoided by using a higher-dimensional representation
+(quaternions or DCMs) for computation, and reserving Euler angles for
+human-readable output where $\theta$ stays well away from $\pm 90^\circ$.
+\end{keybox}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Intrinsic vs Extrinsic: Axis Alignment Comparison}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{3.5cm}p{5.5cm}p{5.5cm}@{}}
+\toprule
+ & \textbf{Intrinsic ZYX} & \textbf{Extrinsic XYZ} \\
+\midrule
+What aligns? & Body $X''$ aligns with nav $Z$ &
+  After fixed-$Y$ rotation of $90^\circ$, fixed-$Z$ rotation acts the same as
+  the earlier fixed-$X$ rotation \\
+Locked axes & Roll (body $X''$) $\leftrightarrow$ Yaw (nav $Z$) &
+  First rotation (fixed $X$) $\leftrightarrow$ Third rotation (fixed $Z$) \\
+Lost DOF & Only $(\psi \pm \phi)$ observable &
+  Only $(\alpha \pm \gamma)$ observable \\
+Intuition & Easier: ``two body axes collapse onto same nav axis'' &
+  Harder: ``fixed-frame rotations become redundant'' \\
+\bottomrule
+\end{tabular}
+\caption{Gimbal lock comparison between intrinsic and extrinsic conventions.}
+\end{table}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{MATLAB Example}
+% ══════════════════════════════════════════════════════════════════════════════
+
+\begin{lstlisting}[style=matlab, caption={Intrinsic ZYX and equivalent
+extrinsic XYZ in MATLAB.}]
+% Intrinsic ZYX (yaw=30 deg, pitch=20 deg, roll=10 deg)
+R_intrinsic = rotz(30) * roty(20) * rotx(10);
+
+% Equivalent extrinsic XYZ (same angles, reversed order)
+% The matrix product is identical:
+R_extrinsic = rotz(30) * roty(20) * rotx(10);
+
+% Verify
+assert(norm(R_intrinsic - R_extrinsic) < 1e-12);
+
+% Nav-to-body
+v_body = R_intrinsic * v_nav;
+
+% Body-to-nav (transpose)
+v_nav  = R_intrinsic' * v_body;
+\end{lstlisting}
+
+% ══════════════════════════════════════════════════════════════════════════════
+\section{Quaternions}
+% ══════════════════════════════════════════════════════════════════════════════
+
+Quaternions provide a singularity-free, compact representation of 3D
+rotations. They use four parameters with one constraint ($\|q\|=1$),
+avoiding the gimbal lock problem inherent in all three-parameter
+representations.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Definition}
+% ──────────────────────────────────────────────────────────────────────────────
+
+A quaternion is a four-dimensional hypercomplex number:
+
+\begin{equation}
+  q = w + x\,\mathbf{i} + y\,\mathbf{j} + z\,\mathbf{k}
+\end{equation}
+
+where $w,x,y,z \in \mathbb{R}$ and the imaginary units satisfy:
+
+\begin{equation}
+  \mathbf{i}^2 = \mathbf{j}^2 = \mathbf{k}^2
+  = \mathbf{i}\,\mathbf{j}\,\mathbf{k} = -1
+\end{equation}
+
+A quaternion is often written as a scalar--vector pair:
+
+\begin{equation}
+  q = (w,\;\vec{v}), \quad \vec{v} = (x,\,y,\,z)
+\end{equation}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Multiplication Rules}
+% ──────────────────────────────────────────────────────────────────────────────
+
+From the imaginary-unit identities the basis multiplication table follows:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}c|ccc@{}}
+\toprule
+$\times$ & $\mathbf{i}$ & $\mathbf{j}$ & $\mathbf{k}$ \\
+\midrule
+$\mathbf{i}$ & $-1$ & $\mathbf{k}$  & $-\mathbf{j}$ \\
+$\mathbf{j}$ & $-\mathbf{k}$ & $-1$ & $\mathbf{i}$  \\
+$\mathbf{k}$ & $\mathbf{j}$  & $-\mathbf{i}$ & $-1$ \\
+\bottomrule
+\end{tabular}
+\caption{Hamilton quaternion basis multiplication table.}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Quaternion Arithmetic}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\textbf{Addition} (element-wise):
+\begin{equation}
+  q_1 + q_2 = (w_1+w_2,\;\vec{v}_1+\vec{v}_2)
+\end{equation}
+
+\textbf{Multiplication} (non-commutative):
+\begin{equation}
+  q_1\,q_2 = \bigl(w_1 w_2 - \vec{v}_1\cdot\vec{v}_2,\;
+              w_1\vec{v}_2 + w_2\vec{v}_1
+              + \vec{v}_1\times\vec{v}_2\bigr)
+\end{equation}
+
+The cross-product term $\vec{v}_1\times\vec{v}_2$ makes quaternion
+multiplication \textbf{non-commutative}: $q_1 q_2 \neq q_2 q_1$ in general.
+
+\textbf{Conjugate}:
+\begin{equation}
+  q^{*} = (w,\;-\vec{v})
+\end{equation}
+
+\textbf{Norm}:
+\begin{equation}
+  \|q\| = \sqrt{w^2 + x^2 + y^2 + z^2}
+\end{equation}
+
+\textbf{Inverse}:
+\begin{equation}
+  q^{-1} = \frac{q^{*}}{\|q\|^2}
+\end{equation}
+
+For \textbf{unit quaternions} ($\|q\|=1$), the inverse equals the conjugate:
+$q^{-1} = q^{*}$.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Unit Quaternions as Rotations}
+% ──────────────────────────────────────────────────────────────────────────────
+
+A unit quaternion encodes a rotation about axis $\hat{n}$ by angle $\theta$:
+
+\begin{equation}
+  q = \left(\cos\frac{\theta}{2},\;
+      \sin\frac{\theta}{2}\;\hat{n}\right)
+\end{equation}
+
+The \textbf{half-angle} arises from the double-cover property (Section
+\ref{sec:double-cover}).
+
+\subsubsection*{Rotating a Vector}
+
+To rotate a vector $\vec{p}$, embed it as a pure quaternion
+$p=(0,\vec{p})$, then compute:
+
+\begin{equation}
+  p' = q\,p\,q^{*}
+\end{equation}
+
+The vector part of $p'$ is the rotated vector.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Composing Rotations}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Applying rotation $q_1$ first, then $q_2$, is a single quaternion
+multiplication:
+
+\begin{equation}
+  q_{\text{total}} = q_2\,q_1
+\end{equation}
+
+The product of two unit quaternions is again a unit quaternion, so no
+renormalisation is needed after composition (unlike numerical integration).
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Conversions}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\subsubsection*{Quaternion $\to$ Rotation Matrix}
+
+\begin{equation}
+  R = \begin{pmatrix}
+    1-2(y^2+z^2) & 2(xy-wz)     & 2(xz+wy) \\
+    2(xy+wz)     & 1-2(x^2+z^2) & 2(yz-wx) \\
+    2(xz-wy)     & 2(yz+wx)     & 1-2(x^2+y^2)
+  \end{pmatrix}
+\end{equation}
+
+\subsubsection*{Quaternion $\to$ Euler Angles (ZYX)}
+
+\begin{align}
+  \phi   &= \operatorname{atan2}\!\bigl(2(wx+yz),\;1-2(x^2+y^2)\bigr) \\
+  \theta &= \arcsin\!\bigl(2(wy-zx)\bigr) \\
+  \psi   &= \operatorname{atan2}\!\bigl(2(wz+xy),\;1-2(y^2+z^2)\bigr)
+\end{align}
+
+\subsubsection*{Axis-Angle $\to$ Quaternion}
+
+\begin{equation}
+  q = \left(\cos\frac{\theta}{2},\;
+      \sin\frac{\theta}{2}\;\hat{n}\right)
+\end{equation}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Double Cover of $SO(3)$}
+\label{sec:double-cover}
+% ──────────────────────────────────────────────────────────────────────────────
+
+Unit quaternions live on $S^3$ (the 3-sphere in $\mathbb{R}^4$). The map
+$q \mapsto R(q)$ from unit quaternions to the rotation group $SO(3)$ is a
+\textbf{2-to-1 surjection}: both $q$ and $-q$ produce the same rotation
+matrix.
+
+\begin{equation}
+  S^3 \big/ \{\pm 1\} \;\cong\; SO(3)
+\end{equation}
+
+This is why the half-angle appears: a full $2\pi$ physical rotation
+corresponds to only a $\pi$ traversal on $S^3$. A $4\pi$ rotation is needed
+to return to the \emph{same} quaternion.
+
+\begin{keybox}[Practical consequence]
+Because $q$ and $-q$ are the same rotation, algorithms that interpolate or
+average quaternions must check the sign of $q_1 \cdot q_2$ and negate one
+quaternion if needed to ensure the shortest-path interpretation.
+\end{keybox}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Quaternion Derivative --- Rotational Kinematics}
+% ──────────────────────────────────────────────────────────────────────────────
+
+If a rigid body has angular velocity $\vec{\omega}$ expressed in the body
+frame, the quaternion evolves as:
+
+\begin{equation}
+  \dot{q} = \tfrac{1}{2}\,q \otimes \omega_q,
+  \qquad \omega_q = (0,\,\vec{\omega})
+\end{equation}
+
+In matrix form:
+
+\begin{equation}
+  \dot{q} = \frac{1}{2}\,\Omega\,q, \qquad
+  \Omega = \begin{pmatrix}
+    0         & -\omega_x & -\omega_y & -\omega_z \\
+    \omega_x  & 0          & \omega_z  & -\omega_y \\
+    \omega_y  & -\omega_z  & 0          & \omega_x  \\
+    \omega_z  & \omega_y   & -\omega_x  & 0
+  \end{pmatrix}
+\end{equation}
+
+This ODE is integrated in INS/AHRS systems to propagate attitude.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{SLERP --- Spherical Linear Interpolation}
+% ──────────────────────────────────────────────────────────────────────────────
+
+To smoothly interpolate between orientations $q_0$ and $q_1$:
+
+\begin{equation}
+  \operatorname{slerp}(q_0,q_1,t)
+  = q_0\,\frac{\sin\bigl((1-t)\,\Omega\bigr)}{\sin\Omega}
+  + q_1\,\frac{\sin(t\,\Omega)}{\sin\Omega},
+  \qquad t\in[0,1]
+\end{equation}
+
+where $\cos\Omega = q_0 \cdot q_1$ (4-D dot product). SLERP traverses the
+great circle on $S^3$, producing constant angular velocity---unlike linear
+interpolation of Euler angles.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Quaternion Error and Attitude Control}
+% ──────────────────────────────────────────────────────────────────────────────
+
+The rotation \emph{from} $q_a$ \emph{to} $q_b$ is:
+
+\begin{equation}
+  q_{\text{err}} = q_b \otimes q_a^{*}
+\end{equation}
+
+For a proportional attitude controller the error signal is commonly
+extracted as:
+
+\begin{equation}
+  \vec{e} = 2\,\operatorname{sign}(w_e)\,\vec{v}_e,
+  \qquad (w_e,\vec{v}_e) = q_{\text{err}}
+\end{equation}
+
+For small angles this approximates the rotation-vector error.
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Exponential and Logarithmic Maps}
+% ──────────────────────────────────────────────────────────────────────────────
+
+These connect unit quaternions to the Lie algebra
+$\mathfrak{so}(3)$.
+
+\textbf{Exponential map} (rotation vector $\to$ quaternion):
+\begin{equation}
+  \exp(\vec{\theta})
+  = \left(\cos\frac{\|\vec{\theta}\|}{2},\;
+    \frac{\vec{\theta}}{\|\vec{\theta}\|}
+    \sin\frac{\|\vec{\theta}\|}{2}\right)
+\end{equation}
+
+\textbf{Logarithmic map} (quaternion $\to$ rotation vector):
+\begin{equation}
+  \log(q)
+  = 2\,\operatorname{atan2}\!\bigl(\|\vec{v}\|,w\bigr)\;
+    \frac{\vec{v}}{\|\vec{v}\|}
+\end{equation}
+
+These maps are essential for:
+\begin{itemize}
+  \item \textbf{Optimisation on $SO(3)$}: perturb in the tangent space, then
+        map back.
+  \item \textbf{Kalman filtering}: attitude errors live in three-dimensional
+        tangent space (multiplicative EKF / MEKF).
+  \item \textbf{Averaging rotations}: compute the mean in log space.
+\end{itemize}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Euler Angles vs.\ Quaternions}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{4cm}p{4.5cm}p{4.5cm}@{}}
+\toprule
+\textbf{Property} & \textbf{Euler Angles} & \textbf{Quaternions} \\
+\midrule
+Parameters        & 3                      & 4 (with 1 constraint) \\
+Singularities     & Gimbal lock at $\pm90^\circ$ pitch & None \\
+Composition       & Trigonometry-heavy     & Single multiplication \\
+Interpolation     & Non-uniform, jerky     & SLERP (smooth) \\
+Numerical drift   & N/A                    & Re-normalise: $q\leftarrow q/\|q\|$ \\
+Human intuition   & Easy                   & Harder initially \\
+\bottomrule
+\end{tabular}
+\caption{Comparison of Euler angles and quaternions.}
+\end{table}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{Practical Tips for GNC}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{enumerate}
+  \item \textbf{Normalisation.} After every integration step, re-normalise:
+        $q \leftarrow q/\|q\|$.
+  \item \textbf{Convention.} Hamilton ($w$ first) vs.\ JPL ($w$ last) changes
+        composition order. Know which your codebase uses.
+  \item \textbf{Sign convention.} Enforce $w>0$ to avoid discontinuities in
+        logging and control.
+  \item \textbf{Small-angle approximation.}
+        For $\theta \ll 1$: $q \approx (1,\,\vec{\theta}/2)$.
+  \item \textbf{MEKF.} Represent attitude error as a 3-vector (rotation
+        vector) to avoid the rank deficiency of estimating 4 quaternion
+        components with a $4\times4$ covariance.
+\end{enumerate}
+
+% ──────────────────────────────────────────────────────────────────────────────
+\subsection{MATLAB Examples}
+% ──────────────────────────────────────────────────────────────────────────────
+
+\begin{lstlisting}[style=matlab, caption={Quaternion rotation of a vector.}]
+% Define a unit quaternion: 45-deg rotation about Z
+theta = deg2rad(45);
+q = [cos(theta/2), 0, 0, sin(theta/2)];   % [w x y z]
+
+% Rotate a vector using quaternion sandwich product
+v = [1; 0; 0];
+v_q = [0, v'];                              % pure quaternion
+v_rot = quatmultiply(quatmultiply(q, v_q), quatconj(q));
+v_rotated = v_rot(2:4)'                     % extract vector part
+\end{lstlisting}
+
+\begin{lstlisting}[style=matlab, caption={Quaternion to Euler (ZYX) and back.}]
+% quaternion -> Euler ZYX
+eul = quat2eul(q, 'ZYX');   % [yaw pitch roll]
+
+% Euler ZYX -> quaternion
+q_back = eul2quat(eul, 'ZYX');
+assert(norm(q - q_back) < 1e-12);
+\end{lstlisting}
+
+\begin{lstlisting}[style=matlab, caption={SLERP between two orientations.}]
+q0 = [1 0 0 0];                     % identity
+q1 = [cos(pi/4) 0 sin(pi/4) 0];     % 90 deg about Y
+t  = 0.5;
+q_mid = quatinterp(q0, q1, t, 'slerp');
+\end{lstlisting}
+
+% ======================================================================
+\section{Denavit--Hartenberg (DH) Parameters}
+% ======================================================================
+
+The Denavit--Hartenberg convention provides a systematic way to describe
+the geometry of a serial kinematic chain (robot arm, excavator boom,
+crane, etc.)\ using only \textbf{four parameters per joint}.  Combined
+with a simple $4\times4$ homogeneous transformation, DH parameters let
+you compute the position and orientation of the end effector from the
+joint angles alone.
+
+% ----------------------------------------------------------------------
+\subsection{The Four DH Parameters}
+% ----------------------------------------------------------------------
+
+Each link $i$ in the chain is described by exactly four quantities:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}clp{8.5cm}@{}}
+\toprule
+\textbf{Symbol} & \textbf{Name} & \textbf{Definition} \\
+\midrule
+$\theta_i$ & Joint angle &
+  Angle about $Z_{i-1}$ from $X_{i-1}$ to $X_i$
+  (measured in the $X_{i-1}$--$Y_{i-1}$ plane). \\[4pt]
+$d_i$      & Link offset &
+  Distance along $Z_{i-1}$ from the origin of frame $i{-}1$
+  to the intersection of $Z_{i-1}$ and $X_i$. \\[4pt]
+$a_i$      & Link length &
+  Distance along $X_i$ from $Z_{i-1}$ to $Z_i$
+  (the ``common normal'' length). \\[4pt]
+$\alpha_i$ & Link twist &
+  Angle about $X_i$ from $Z_{i-1}$ to $Z_i$
+  (measured in the $Y_i$--$Z_i$ plane). \\
+\bottomrule
+\end{tabular}
+\caption{The four Denavit--Hartenberg parameters for link $i$.}
+\end{table}
+
+\begin{keybox}[DH frame assignment rules]
+\begin{enumerate}
+  \item The $Z_{i-1}$ axis lies along the axis of joint $i$.
+  \item The $X_i$ axis is the common normal from $Z_{i-1}$ to $Z_i$,
+        pointing away from $Z_{i-1}$.
+  \item The $Y_i$ axis completes the right-hand frame:
+        $Y_i = Z_i \times X_i$.
+  \item The origin of frame $i$ is at the intersection of $X_i$ and
+        $Z_i$ (or at the foot of the common normal on $Z_i$).
+\end{enumerate}
+\end{keybox}
+
+% ----------------------------------------------------------------------
+\subsection{The DH Transformation Matrix}
+% ----------------------------------------------------------------------
+
+The homogeneous transformation from frame $i{-}1$ to frame $i$ is:
+
+\begin{equation}
+\boxed{
+  {}^{i-1}T_i =
+  \underbrace{
+    \operatorname{Rot}_{Z}(\theta_i)\;
+    \operatorname{Trans}_{Z}(d_i)
+  }_{\text{along }Z_{i-1}}
+  \;
+  \underbrace{
+    \operatorname{Trans}_{X}(a_i)\;
+    \operatorname{Rot}_{X}(\alpha_i)
+  }_{\text{along }X_i}
+}
+\label{eq:DH-decomp}
+\end{equation}
+
+Multiplying these four elementary transforms out:
+
+\begin{equation}
+\boxed{
+  {}^{i-1}T_i =
+  \begin{pmatrix}
+    \cos\theta_i & -\sin\theta_i\cos\alpha_i &
+      \sin\theta_i\sin\alpha_i  & a_i\cos\theta_i \\[3pt]
+    \sin\theta_i &  \cos\theta_i\cos\alpha_i &
+      -\cos\theta_i\sin\alpha_i & a_i\sin\theta_i \\[3pt]
+    0 & \sin\alpha_i & \cos\alpha_i & d_i \\[3pt]
+    0 & 0 & 0 & 1
+  \end{pmatrix}
+}
+\label{eq:DH-matrix}
+\end{equation}
+
+The upper-left $3\times3$ block is the rotation ${}^{i-1}R_i$; the
+right-most column (top three entries) is the translation
+${}^{i-1}\vec{p}_i$.
+
+\begin{keybox}[Reading the matrix]
+\begin{itemize}
+  \item \textbf{Row 3, col 4}: $d_i$ --- the offset along the previous
+        joint axis.
+  \item \textbf{Rows 1--2, col 4}: $a_i\cos\theta_i$ and
+        $a_i\sin\theta_i$ --- the link-length contribution projected
+        by the joint angle.
+  \item \textbf{Column 3}: contains $\sin\alpha_i$, $\cos\alpha_i$ ---
+        the twist between successive $Z$ axes.
+\end{itemize}
+\end{keybox}
+
+% ----------------------------------------------------------------------
+\subsection{Rotary (Revolute) vs.\ Linear (Prismatic) Joints}
+% ----------------------------------------------------------------------
+
+The four DH parameters have different roles depending on the joint type:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}p{3.2cm}p{5.5cm}p{5.5cm}@{}}
+\toprule
+ & \textbf{Revolute (Rotary) Joint} &
+   \textbf{Prismatic (Linear) Joint} \\
+\midrule
+Joint variable &
+  $\theta_i$ (angle) &
+  $d_i$ (displacement) \\[4pt]
+Fixed parameters &
+  $d_i,\; a_i,\; \alpha_i$ &
+  $\theta_i,\; a_i,\; \alpha_i$ \\[4pt]
+Motion &
+  Rotation about $Z_{i-1}$ &
+  Translation along $Z_{i-1}$ \\[4pt]
+DH matrix changes &
+  $\cos\theta_i$, $\sin\theta_i$ vary &
+  $d_i$ varies (row 3, col 4) \\[4pt]
+Typical use &
+  Robot elbow, excavator boom pivot,
+  steering joint &
+  Hydraulic cylinder, telescoping mast,
+  linear actuator \\
+\bottomrule
+\end{tabular}
+\caption{DH parameter roles for revolute vs.\ prismatic joints.}
+\end{table}
+
+\begin{warningbox}[Identifying the joint variable]
+For \textbf{any} joint, exactly \textbf{one} of the four DH parameters
+is the joint variable; the other three are fixed by the mechanism
+geometry.
+\begin{itemize}
+  \item Revolute: the joint variable is $\theta_i$.
+  \item Prismatic: the joint variable is $d_i$.
+\end{itemize}
+All higher-order joints (helical, cylindrical, spherical) can be
+decomposed into combinations of these two.
+\end{warningbox}
+
+\subsubsection*{Revolute Joint --- Details}
+
+For a revolute joint at link $i$:
+\begin{itemize}
+  \item $\theta_i$ is the \textbf{unknown} (measured by encoder or
+        commanded by controller).
+  \item $d_i$ is a fixed offset (often zero for planar mechanisms).
+  \item $a_i$ is the physical link length (boom segment, forearm, etc.).
+  \item $\alpha_i$ is the fixed twist angle between consecutive axes
+        (e.g.\ $0^\circ$ for parallel axes, $90^\circ$ for
+        perpendicular).
+\end{itemize}
+
+\subsubsection*{Prismatic Joint --- Details}
+
+For a prismatic joint at link $i$:
+\begin{itemize}
+  \item $d_i$ is the \textbf{unknown} (cylinder extension).
+  \item $\theta_i$ is a fixed constant (often $0^\circ$).
+  \item $a_i$ is typically $0$ (the slide direction \emph{is} the
+        $Z_{i-1}$ axis).
+  \item $\alpha_i$ sets the twist to the next joint's axis.
+\end{itemize}
+
+% ----------------------------------------------------------------------
+\subsection{Forward Kinematics --- End Effector Position}
+% ----------------------------------------------------------------------
+
+For an $n$-joint serial chain the end effector pose (position $+$
+orientation) in the base frame is:
+
+\begin{equation}
+\boxed{
+  {}^{0}T_n = {}^{0}T_1 \;\; {}^{1}T_2 \;\; {}^{2}T_3 \;\cdots\;
+  {}^{n-1}T_n
+  = \prod_{i=1}^{n} {}^{i-1}T_i
+}
+\label{eq:FK}
+\end{equation}
+
+Each ${}^{i-1}T_i$ is the $4\times4$ DH matrix from
+Equation~\eqref{eq:DH-matrix}, evaluated with the current joint
+variable ($\theta_i$ or $d_i$).
+
+From the resulting $4\times4$ matrix:
+
+\begin{equation}
+  {}^{0}T_n =
+  \begin{pmatrix}
+    {}^{0}R_n & {}^{0}\vec{p}_n \\
+    \vec{0}^T & 1
+  \end{pmatrix}
+\end{equation}
+
+\begin{itemize}
+  \item ${}^{0}\vec{p}_n = \begin{pmatrix} p_x \\ p_y \\ p_z \end{pmatrix}$
+        is the \textbf{end effector position} in the base frame.
+  \item ${}^{0}R_n$ is the \textbf{end effector orientation} (a $3\times3$
+        rotation matrix that can be converted to Euler angles or a
+        quaternion using the formulas in earlier sections).
+\end{itemize}
+
+\subsubsection*{Worked Example: 2-Link Planar Arm (Two Revolute Joints)}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Link} & $\theta_i$ & $d_i$ & $a_i$ & $\alpha_i$ \\
+\midrule
+1 & $\theta_1$ (variable) & 0 & $L_1$ & $0^\circ$ \\
+2 & $\theta_2$ (variable) & 0 & $L_2$ & $0^\circ$ \\
+\bottomrule
+\end{tabular}
+\caption{DH table for a 2-DOF planar arm.}
+\end{table}
+
+With $\alpha_i = 0$ and $d_i = 0$, each DH matrix simplifies to:
+
+\begin{equation}
+  {}^{i-1}T_i =
+  \begin{pmatrix}
+    \cos\theta_i & -\sin\theta_i & 0 & L_i\cos\theta_i \\
+    \sin\theta_i &  \cos\theta_i & 0 & L_i\sin\theta_i \\
+    0 & 0 & 1 & 0 \\
+    0 & 0 & 0 & 1
+  \end{pmatrix}
+\end{equation}
+
+The end effector position is:
+
+\begin{equation}
+\boxed{
+  \begin{pmatrix} p_x \\ p_y \end{pmatrix}
+  = \begin{pmatrix}
+      L_1\cos\theta_1 + L_2\cos(\theta_1+\theta_2) \\
+      L_1\sin\theta_1 + L_2\sin(\theta_1+\theta_2)
+    \end{pmatrix}
+}
+\end{equation}
+
+This is the classic 2-link forward kinematics result.
+
+\subsubsection*{Worked Example: Revolute + Prismatic (RP)}
+
+Consider a rotary base followed by a telescoping arm:
+
+\begin{table}[h]
+\centering
+\begin{tabular}{@{}ccccc@{}}
+\toprule
+\textbf{Link} & $\theta_i$ & $d_i$ & $a_i$ & $\alpha_i$ \\
+\midrule
+1 (revolute)  & $\theta_1$ (variable) & 0   & 0 & $90^\circ$ \\
+2 (prismatic) & $0^\circ$             & $d_2$ (variable) & 0 & $0^\circ$ \\
+\bottomrule
+\end{tabular}
+\caption{DH table for a revolute--prismatic (RP) mechanism.}
+\end{table}
+
+Joint 1 rotates about the base $Z_0$; joint 2 extends along $Z_1$
+(perpendicular to $Z_0$ due to $\alpha_1 = 90^\circ$).
+
+\begin{equation}
+  {}^{0}T_1 =
+  \begin{pmatrix}
+    \cos\theta_1 & 0 & \sin\theta_1 & 0 \\
+    \sin\theta_1 & 0 & -\cos\theta_1 & 0 \\
+    0 & 1 & 0 & 0 \\
+    0 & 0 & 0 & 1
+  \end{pmatrix},\quad
+  {}^{1}T_2 =
+  \begin{pmatrix}
+    1 & 0 & 0 & 0 \\
+    0 & 1 & 0 & 0 \\
+    0 & 0 & 1 & d_2 \\
+    0 & 0 & 0 & 1
+  \end{pmatrix}
+\end{equation}
+
+End effector position:
+
+\begin{equation}
+\boxed{
+  {}^{0}\vec{p}_2 =
+  \begin{pmatrix}
+    d_2\,\sin\theta_1 \\ -d_2\,\cos\theta_1 \\ 0
+  \end{pmatrix}
+}
+\end{equation}
+
+The prismatic extension $d_2$ is projected through the base rotation
+$\theta_1$---exactly how a turret-mounted telescoping arm behaves.
+
+% ----------------------------------------------------------------------
+\subsection{Summary of DH Procedure}
+% ----------------------------------------------------------------------
+
+\begin{enumerate}
+  \item \textbf{Number the joints} 1 to $n$ from base to end effector.
+  \item \textbf{Assign $Z$ axes}: $Z_{i-1}$ along the axis of joint $i$.
+  \item \textbf{Assign $X$ axes}: $X_i$ along the common normal from
+        $Z_{i-1}$ to $Z_i$.
+  \item \textbf{Fill the DH table}: for each link, record
+        $\theta_i$, $d_i$, $a_i$, $\alpha_i$.
+  \item \textbf{Mark the joint variable}: $\theta_i$ for revolute,
+        $d_i$ for prismatic.
+  \item \textbf{Build ${}^{i-1}T_i$}: plug each row of the table into
+        Equation~\eqref{eq:DH-matrix}.
+  \item \textbf{Multiply}: ${}^{0}T_n = \prod {}^{i-1}T_i$ to get the
+        end effector pose.
+\end{enumerate}
+
+\begin{keybox}[DH vs.\ Euler angles]
+DH parameters describe the \emph{geometry between successive joints}
+(link lengths, offsets, twists), while Euler angles describe the
+\emph{orientation of a single body}.  A serial chain's end effector
+orientation (extracted from ${}^{0}R_n$) can be converted to Euler
+angles or quaternions using the formulas in Sections~2 and~6.
+\end{keybox}
+
+\begin{lstlisting}[style=matlab, caption={Forward kinematics of a 3-DOF
+arm using DH parameters in MATLAB.}]
+function T = DH(theta, d, a, alpha)
+% Build 4x4 DH transformation matrix
+  ct = cos(theta); st = sin(theta);
+  ca = cos(alpha); sa = sin(alpha);
+  T = [ct, -st*ca,  st*sa, a*ct;
+       st,  ct*ca, -ct*sa, a*st;
+        0,     sa,     ca,    d;
+        0,      0,      0,    1];
+end
+
+% Example: 3-link planar arm (all revolute, alpha=0, d=0)
+L = [0.5, 0.4, 0.3];          % link lengths [m]
+q = deg2rad([30, 45, -20]);    % joint angles [rad]
+
+T_total = eye(4);
+for i = 1:3
+    T_total = T_total * DH(q(i), 0, L(i), 0);
+end
+
+p_ee = T_total(1:3, 4);           % end effector position
+R_ee = T_total(1:3, 1:3);         % end effector orientation
+eul  = rotm2eul(R_ee, 'ZYX');     % convert to Euler angles
+\end{lstlisting}
+
+\end{document}
